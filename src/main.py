@@ -5,6 +5,7 @@ from PySide6.QtCore import QLoggingCategory, QTimer
 from PySide6.QtGui import QIcon, QImageReader
 from PySide6.QtWidgets import QApplication, QMessageBox
 from startrails.paths import configure_work_directory
+from startrails.snap import cuda_component_hint, is_snap
 from startrails.windows import configure_taskbar_identity
 import startrails.ui.resources_rc
 
@@ -61,6 +62,11 @@ def main():
         logging.exception("Application startup failed")
         QMessageBox.critical(None, "StarTrails AI", f"Could not start StarTrails AI:\n{error}")
         return 1
+
+    if is_snap():
+        # snapd keeps snap installs up to date; GitHub releases are for the installers.
+        window.project_overlay.set_update_status(cuda_component_hint())
+        return qapp.exec()
 
     try:
         from startrails.ui.updates import UpdateChecker

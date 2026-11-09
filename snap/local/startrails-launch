@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# desktop-launch adds the gnome runtime's Python 3.14 stdlib, which breaks the bundled 3.12.
+unset PYTHONPATH
+# The cuda component's torch shadows the base snap's CPU build.
+if [ -d "$SNAP_COMPONENTS/cuda/site-packages" ]; then
+    export PYTHONPATH="$SNAP_COMPONENTS/cuda/site-packages"
+fi
+
+# Keep projects and state in a visible directory, as the macOS release does.
+if [ -z "${STARTRAILS_WORK_DIR+x}" ]; then
+    export STARTRAILS_WORK_DIR="$SNAP_REAL_HOME/Documents/Startrails"
+fi
+exec "$SNAP/python/bin/python3" "$SNAP/app/src/main.py" "$@"

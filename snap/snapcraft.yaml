@@ -1,0 +1,128 @@
+name: startrails
+title: StarTrails AI
+base: core26
+adopt-info: startrails
+summary: Stack nightscape photographs and remove satellite streaks
+description: |
+  StarTrails AI is an open-source desktop app for stacking nightscape
+  photographs. It offers two workflows:
+
+  - Startrails: detect and remove satellite and airplane streaks, create star
+    trail stacks, and fill gaps in the trails.
+  - Denoise: create tight sky masks, align and stack the sky separately from
+    the ground, and tune noise.
+
+  Projects and application state are kept in ~/Documents/Startrails. Set
+  STARTRAILS_WORK_DIR to use another directory.
+
+  The snap runs on the CPU. For NVIDIA GPU acceleration, install the optional
+  cuda component with `snap install startrails+cuda`. It contains NVIDIA's
+  proprietary CUDA libraries under NVIDIA's license terms; this snap contains
+  only open-source software.
+license: MIT
+website: https://github.com/gkyle/startrails
+source-code: https://github.com/gkyle/startrails
+issues: https://github.com/gkyle/startrails/issues
+grade: devel
+confinement: strict
+# Faster decompression for torch's large libraries at startup, at the cost of size.
+compression: lzo
+
+platforms:
+  amd64:
+
+components:
+  cuda:
+    type: standard
+    summary: NVIDIA CUDA acceleration for StarTrails AI
+    description: |
+      CUDA builds of PyTorch and CuPy for NVIDIA GPUs. Without this component
+      StarTrails AI runs on the CPU. Install it with:
+
+        snap install startrails+cuda
+
+      This component redistributes NVIDIA CUDA, cuDNN, and related runtime
+      libraries, which are proprietary software licensed by NVIDIA. Their
+      license agreements ship with the component in each package's
+      site-packages/*.dist-info directory. PyTorch, torchvision, Triton, CuPy,
+      and the CUDA Python bindings are open source under their own licenses.
+
+apps:
+  startrails:
+    command: bin/startrails-launch
+    desktop: usr/share/applications/startrails.desktop
+    extensions: [gnome]
+    plugs:
+      - home
+      - removable-media
+      - network
+      - opengl
+      - hardware-observe
+    environment:
+      # Host NVIDIA userspace (libcuda, libnvidia-ml) for torch, CuPy and NVML.
+      LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:/var/lib/snapd/lib/gl
+      # desktop-launch keeps an inherited value, e.g. from a snapped terminal.
+      GDK_PIXBUF_MODULE_FILE: $SNAP_USER_COMMON/.cache/gdk-pixbuf-loaders.cache
+
+parts:
+  # core26 ships Python 3.14, so bundle the uv-managed CPython pinned in
+  # build/toolchain.json, as the Windows and macOS releases do.
+  startrails:
+    plugin: nil
+    source: .
+    build-packages:
+      - python3-venv
+    stage-packages:
+      # Qt's xcb platform plugin, for X11 sessions.
+      - libxcb-cursor0
+      - libxcb-icccm4
+      - libxcb-keysyms1
+      - libxcb-shape0
+      - libxcb-xkb1
+      - libxkbcommon-x11-0
+    override-pull: |
+      craftctl default
+      craftctl set version="$(/usr/bin/python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+    override-build: |
+      # The gnome extension points PYTHONPATH at its SDK; keep it away from our interpreters.
+      unset PYTHONPATH
+      toolchain() { /usr/bin/python3 -c "import json, sys; print(json.load(open('build/toolchain.json'))[sys.argv[1]])" "$1"; }
+      /usr/bin/python3 -m venv "$CRAFT_PART_BUILD/.uv"
+      "$CRAFT_PART_BUILD/.uv/bin/pip" install --quiet "uv==$(toolchain uv_version)"
+      uv="$CRAFT_PART_BUILD/.uv/bin/uv"
+
+      export UV_PYTHON_INSTALL_DIR="$CRAFT_PART_BUILD/.pythons"
+      python_version="$(toolchain python_version)"
+      "$uv" python install "$python_version" --no-bin
+      rm -rf "$CRAFT_PART_INSTALL/python"
+      # Skip uv's cpython-3.12-* minor-version link; copy the exact install.
+      cp -a "$UV_PYTHON_INSTALL_DIR"/cpython-"$python_version"-linux-*/ "$CRAFT_PART_INSTALL/python"
+
+      # Sync straight into the bundled interpreter so uv.lock picks each package's index.
+      # The base snap gets CPU torch; the cuda component carries the CUDA builds.
+      cp -a "$CRAFT_PART_INSTALL/python" "$CRAFT_PART_BUILD/.python-cuda"
+      UV_PROJECT_ENVIRONMENT="$CRAFT_PART_INSTALL/python" "$uv" sync \
+        --frozen --no-dev --no-install-project --compile-bytecode --extra cpu
+      UV_PROJECT_ENVIRONMENT="$CRAFT_PART_BUILD/.python-cuda" "$uv" sync \
+        --frozen --no-dev --no-install-project --compile-bytecode --extra cu133
+      rm -rf "$CRAFT_PART_INSTALL/cuda-site-packages"
+      "$CRAFT_PART_INSTALL/python/bin/python3" snap/split_cuda.py \
+        "$CRAFT_PART_INSTALL/python" "$CRAFT_PART_BUILD/.python-cuda" "$CRAFT_PART_INSTALL/cuda-site-packages"
+
+      mkdir -p "$CRAFT_PART_INSTALL/app"
+      cp -r src models pyproject.toml "$CRAFT_PART_INSTALL/app/"
+
+      # $SNAP is read-only, so anything not compiled here is recompiled on every launch.
+      # uv only compiled site-packages; the stdlib and app sources need it too.
+      "$CRAFT_PART_INSTALL/python/bin/python3" -m compileall -q -j0 \
+        --invalidation-mode unchecked-hash -x '/(site-packages|test|idlelib)/' \
+        "$CRAFT_PART_INSTALL/python/lib/python3.12" "$CRAFT_PART_INSTALL/app/src"
+    organize:
+      cuda-site-packages: (component/cuda)/site-packages
+
+  launcher:
+    plugin: dump
+    source: snap/local
+    organize:
+      startrails-launch: bin/startrails-launch
+      startrails.desktop: usr/share/applications/startrails.desktop

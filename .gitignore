@@ -19,6 +19,8 @@ AGENTS.md
 
 # Build
 /out/
+/*.snap
+/*.comp
 
 # Startrails
 data/

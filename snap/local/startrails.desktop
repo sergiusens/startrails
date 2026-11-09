@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=StarTrails AI
+Comment=Stack nightscape photographs and remove satellite streaks
+Exec=startrails %f
+Icon=${SNAP}/app/src/startrails/ui/icons/startrails_desktop.png
+Categories=Graphics;Photography;
+Terminal=false
+StartupWMClass=StarTrails
